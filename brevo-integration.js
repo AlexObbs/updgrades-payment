@@ -1,4 +1,4 @@
-// brevo-integration.js - Make sure this file has all functions properly exported
+// brevo-integration.js - Email sending functionality using only Brevo API (nodemailer removed)
 const SibApiV3Sdk = require('sib-api-v3-sdk');
 
 // Configure Brevo API client
@@ -44,8 +44,7 @@ const sendAdminNotification = async (bookingData, items = []) => {
     // Get admin emails from environment or use default
     const adminEmails = process.env.ADMIN_EMAILS 
       ? process.env.ADMIN_EMAILS.split(',') 
-      : ['amiraalexobbs@gmail.com', 'info@kenyaonabudgetsafaris.co.uk'];
-
+      : ['amiraalexobbs@gmail.com','info@kenyaonabudgetsafaris.co.uk'];
     
     if (adminEmails.length === 0) {
       console.warn('No admin emails configured. Skipping admin notification.');
