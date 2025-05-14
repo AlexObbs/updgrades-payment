@@ -7,7 +7,7 @@ const express = require('express');
 const cors = require('cors');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const fs = require('fs');
-const nodemailer = require('nodemailer');
+
 const SibApiV3Sdk = require('sib-api-v3-sdk');
 const QRCode = require('qrcode');
 
