@@ -7,6 +7,7 @@ const express = require('express');
 const cors = require('cors');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const fs = require('fs');
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const SibApiV3Sdk = require('sib-api-v3-sdk');
 const QRCode = require('qrcode');
@@ -47,6 +48,11 @@ BREVO_SMTP_PASSWORD=your_brevo_smtp_password
 # Server Configuration
 PORT=3000
 SERVER_URL=http://localhost:3000
+
+# Anti-Sleep Configuration
+NODE_ENV=production
+RENDER_EXTERNAL_URL=https://your-activity-upgrades-server-url.onrender.com
+PAYMENT_SERVER_URL=https://your-payment-server-url.onrender.com
 
 # Admin Emails for Notifications
 ADMIN_EMAILS=admin1@example.com,admin2@example.com
@@ -111,6 +117,7 @@ app.get('/', function(req, res) {
         <p>Firebase integration: ${firebaseInitialized ? 'Enabled' : 'Disabled'}</p>
         <p>Stripe: Initialized</p>
         <p>Email: ${process.env.BREVO_API_KEY ? 'Configured' : 'Not Configured'}</p>
+        <p>Keep-alive: ${process.env.NODE_ENV === 'production' ? 'Active' : 'Disabled'}</p>
         <a href="/test-checkout" class="btn">Test Checkout</a>
       </div>
     </body>
@@ -506,12 +513,6 @@ app.get('/create-and-redirect-checkout', async function(req, res) {
 /**
  * Verify payment status endpoint
  */
-// Updated verify-payment endpoint to automatically notify admins
-// Add this to activity-upgrades-server.js (replacing the existing verify-payment endpoint)
-
-/**
- * Verify payment status endpoint
- */
 app.post('/verify-payment', async function(req, res) {
   try {
     const { sessionId, checkoutSessionId } = req.body;
@@ -731,12 +732,6 @@ async function processSuccessfulPayment(checkoutSessionId, stripeSession, bookin
     console.log(`Successfully processed checkout for user ${userId}`);
   }
 }
-
-/**
- * Endpoint to send receipt via email
- */
-// Updated send-receipt-email endpoint
-// Add this to activity-upgrades-server.js (replacing the existing route)
 
 /**
  * Endpoint to send receipt via email
@@ -1285,13 +1280,70 @@ app.get('/health', function(req, res) {
   res.json({ 
     status: 'healthy', 
     message: 'Activity upgrades payment server is running',
+    timestamp: new Date().toISOString(),
     firebase: firebaseInitialized ? 'connected' : 'disabled',
     email: process.env.BREVO_API_KEY ? 'configured' : 'not configured'
   });
 });
 
+/**
+ * Endpoint to ping payment server 
+ */
+app.get('/ping-payment', async function(req, res) {
+  try {
+    const paymentServerUrl = process.env.PAYMENT_SERVER_URL;
+    if (!paymentServerUrl) {
+      return res.status(400).json({ error: 'Payment server URL not configured' });
+    }
+    
+    const response = await fetch(`${paymentServerUrl}/health`);
+    const data = await response.json();
+    
+    console.log('🏓 Pinged payment server successfully:', data);
+    res.json({ success: true, paymentServerStatus: data });
+  } catch (error) {
+    console.error('Failed to ping payment server:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Set up keep-alive mechanisms
+function setupKeepAlive() {
+  // Add keep-alive ping to prevent sleep on Render free tier
+  if (process.env.NODE_ENV === 'production') {
+    const serviceUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+    
+    // 1. Self-ping to keep this server alive
+    setInterval(() => {
+      try {
+        fetch(`${serviceUrl}/health`)
+          .then(() => console.log('🏓 Self keep-alive ping sent'))
+          .catch(err => console.error('Self keep-alive ping failed:', err.message));
+      } catch (error) {
+        console.error('Error sending self keep-alive ping:', error);
+      }
+    }, 11 * 60 * 1000); // Every 11 minutes (slightly different timing from the other server)
+    
+    // 2. Ping the payment server
+    const paymentServerUrl = process.env.PAYMENT_SERVER_URL;
+    if (paymentServerUrl) {
+      setInterval(() => {
+        try {
+          fetch(`${paymentServerUrl}/health`)
+            .then(() => console.log('🏓 Payment server keep-alive ping sent'))
+            .catch(err => console.error('Payment server keep-alive ping failed:', err.message));
+        } catch (error) {
+          console.error('Error sending payment server keep-alive ping:', error);
+        }
+      }, 9 * 60 * 1000); // Every 9 minutes (offset from self-ping)
+    } else {
+      console.warn('⚠️ Payment server URL not configured. Add PAYMENT_SERVER_URL to your environment variables for mutual pinging.');
+    }
+  }
+}
+
 // Start the server
-app.listen(PORT, function() {
+const server = app.listen(PORT, function() {
   console.log(`
 ===========================================
 🔥 Activity Upgrades Payment Server running on port ${PORT} 🔥
@@ -1307,10 +1359,15 @@ Available endpoints:
 - GET  /payment-cancelled         - Payment cancelled page
 - POST /send-receipt-email        - Send receipt via email
 - GET  /health                    - Health check endpoint
+- GET  /ping-payment              - Ping payment server to keep it alive
 
 Firebase integration: ${firebaseInitialized ? 'ENABLED' : 'DISABLED'}
 Email integration: ${process.env.BREVO_API_KEY ? 'ENABLED' : 'DISABLED'}
+Keep-alive system: ${process.env.NODE_ENV === 'production' ? 'ACTIVE' : 'DISABLED IN DEVELOPMENT MODE'}
 
 Server is ready for activity upgrades payments!
   `);
+  
+  // Set up keep-alive mechanisms
+  setupKeepAlive();
 });
